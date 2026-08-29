@@ -7,6 +7,13 @@ import { CategoryCard } from "./CategoryCard";
 
 export type SortKey = "name" | "count" | "recent";
 
+/**
+ * Recency is the default: the archive is 1,900 items deep and mostly static, so
+ * the useful question on arrival is what moved lately, not what starts with "a".
+ * Kept out of the URL when active (see the sync effect) so a bare `/` is canonical.
+ */
+const DEFAULT_SORT: SortKey = "recent";
+
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "name", label: "A–Z" },
   { key: "count", label: "Most items" },
@@ -33,7 +40,7 @@ export function CatalogGrid({
   const [query, setQuery] = useState(() => params.get("q") ?? "");
   const [sort, setSort] = useState<SortKey>(() => {
     const s = params.get("sort");
-    return s === "count" || s === "recent" ? s : "name";
+    return s === "count" || s === "recent" || s === "name" ? s : DEFAULT_SORT;
   });
   const deferredQuery = useDeferredValue(query);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,7 +62,7 @@ export function CatalogGrid({
   useEffect(() => {
     const next = new URLSearchParams();
     if (deferredQuery) next.set("q", deferredQuery);
-    if (sort !== "name") next.set("sort", sort);
+    if (sort !== DEFAULT_SORT) next.set("sort", sort);
     const qs = next.toString();
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }, [deferredQuery, sort, router]);
