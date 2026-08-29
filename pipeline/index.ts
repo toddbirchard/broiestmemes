@@ -34,8 +34,8 @@ if (values.help) {
 broiestmemes pipeline
 
   --force            reprocess everything, ignoring the previous manifest
-  --only <category>  restrict to one category
-  --limit <n>        stop after n items (smoke tests)
+  --only <category>  restrict to one category (never publishes or prunes)
+  --limit <n>        stop after n items (smoke tests; never publishes or prunes)
   --dry-run          derive but upload nothing
   --concurrency <n>  parallel workers (default 6)
   --no-video         skip H.264 transcodes (much faster; posters only)
@@ -46,6 +46,13 @@ broiestmemes pipeline
 const DRY = values["dry-run"] === true;
 const WITH_VIDEO = values["no-video"] !== true;
 const CONCURRENCY = Math.max(1, Number(values.concurrency) || 6);
+
+/**
+ * True when this run deliberately looked at only part of the bucket. Such a run
+ * must never prune and must never publish: both operations treat "absent from
+ * this run" as "deleted upstream", which is false by construction here.
+ */
+const PARTIAL = values.only !== undefined || values.limit !== undefined;
 
 /**
  * Sources above this size are transcoded one at a time. A single 54MB GIF peaks
@@ -276,29 +283,43 @@ async function main() {
   ManifestSchema.parse(manifest);
 
   // ---- prune ------------------------------------------------------------
-  const prune = pLimit(12);
+  //
+  // DESTRUCTIVE, and only ever correct for a run that saw the WHOLE bucket.
+  //
+  // Pruning infers "this was deleted upstream" from absence: anything in the
+  // previous manifest but not in `sources` gets its derivatives removed. Under
+  // `--only` or `--limit`, `sources` is a deliberate subset — so that inference
+  // is catastrophically wrong. `--only gerald` would conclude the other 1,897
+  // entries and 111 category files had been deleted and wipe every one of them.
+  //
+  // Same guard as the publish step below, and for the same reason.
+  if (PARTIAL) {
+    console.log("→ partial run (--only/--limit): pruning SKIPPED");
+  } else {
+    const prune = pLimit(12);
 
-  const removed = (previous?.items ?? []).filter((e) => !liveNames.has(e.source.name));
-  if (removed.length > 0) {
-    console.log(`→ pruning ${removed.length} deleted source(s)`);
-    if (!DRY) {
-      await Promise.all(
-        removed.flatMap((e) => derivativePaths(e).map((p) => prune(() => deleteObject(p))))
-      );
+    const removed = (previous?.items ?? []).filter((e) => !liveNames.has(e.source.name));
+    if (removed.length > 0) {
+      console.log(`→ pruning ${removed.length} deleted source(s)`);
+      if (!DRY) {
+        await Promise.all(
+          removed.flatMap((e) => derivativePaths(e).map((p) => prune(() => deleteObject(p))))
+        );
+      }
     }
-  }
 
-  // Emptying a category leaves its `_derived/c/<name>.v1.json` behind, and the
-  // site fetches those by path — so an orphan keeps a deleted category serving
-  // 200 with its old contents. Delete any category file with no live category.
-  const liveCategoryPaths = new Set(categories.map((c) => categoryPath(c.name)));
-  const orphanCategoryFiles = all
-    .map((o) => o.name)
-    .filter((n) => n.startsWith("_derived/c/") && !liveCategoryPaths.has(n));
-  if (orphanCategoryFiles.length > 0) {
-    console.log(`→ pruning ${orphanCategoryFiles.length} orphaned category file(s)`);
-    if (!DRY) {
-      await Promise.all(orphanCategoryFiles.map((p) => prune(() => deleteObject(p))));
+    // Emptying a category leaves its `_derived/c/<name>.v1.json` behind, and the
+    // site fetches those by path — so an orphan keeps a deleted category serving
+    // 200 with its old contents. Delete any category file with no live category.
+    const liveCategoryPaths = new Set(categories.map((c) => categoryPath(c.name)));
+    const orphanCategoryFiles = all
+      .map((o) => o.name)
+      .filter((n) => n.startsWith("_derived/c/") && !liveCategoryPaths.has(n));
+    if (orphanCategoryFiles.length > 0) {
+      console.log(`→ pruning ${orphanCategoryFiles.length} orphaned category file(s)`);
+      if (!DRY) {
+        await Promise.all(orphanCategoryFiles.map((p) => prune(() => deleteObject(p))));
+      }
     }
   }
 
@@ -306,7 +327,7 @@ async function main() {
   const json = JSON.stringify(manifest);
   if (DRY) {
     console.log(`→ dry run: would upload manifest (${(json.length / 1024).toFixed(0)}KB)`);
-  } else if (values.only || values.limit) {
+  } else if (PARTIAL) {
     // A partial run's entry list is not the whole bucket; publishing it would
     // delete every other category from the site.
     console.log("→ partial run (--only/--limit): manifest NOT published");

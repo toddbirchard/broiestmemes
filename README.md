@@ -32,11 +32,17 @@ comfortably under it.
 
 ## Develop
 
+Node is pinned to **22.23.2** (LTS "Jod") in `.nvmrc` and `engines`.
+
 ```bash
+nvm use            # reads .nvmrc
 pnpm install
 cp .env.example .env.local
 pnpm dev
 ```
+
+If you switch Node majors, reinstall rather than reusing `node_modules` — `sharp` and
+`ffmpeg-static` both carry platform binaries.
 
 ## Pipeline
 
@@ -46,11 +52,16 @@ commit it, and never put it in `public/`).
 
 ```bash
 pnpm pipeline                    # incremental: usually 0 processed, ~2s
-pnpm pipeline --only gerald      # one category (does NOT publish the manifest)
+pnpm pipeline --only gerald      # one category (never publishes or prunes)
 pnpm pipeline --dry-run          # derive, upload nothing
 pnpm pipeline --force            # ignore previous state, rebuild everything
 pnpm pipeline --no-video         # skip H.264 transcodes (much faster)
 ```
+
+`--only` and `--limit` are read-mostly on purpose: a partial run sees a deliberate
+subset of the bucket, and both publishing and pruning treat "absent from this run" as
+"deleted upstream". Letting either happen from a partial run would wipe every category
+it didn't look at.
 
 Incrementality keys on the GCS object `generation`, which changes on every overwrite.
 Nothing else is reprocessed. Bumping `PIPELINE_VERSION` in `src/types/manifest.ts` forces
@@ -58,13 +69,21 @@ a full regeneration — the escape hatch when encoder settings change.
 
 A full backfill takes ~4 minutes and ~360 MB of derivatives.
 
+After a run that changed something, the pipeline POSTs `/api/revalidate` to drop the
+site's cached manifest immediately — set `REVALIDATE_SECRET` and `NEXT_PUBLIC_SITE_URL`
+in your local env to match `/var/www/broiestmemes/.env` and it happens automatically.
+It's optional: without it the site picks up changes on its own within 300s.
+
 ## Deploy
 
-Self-hosted on a DigitalOcean droplet. CI builds, rsyncs a release, and flips an atomic
-symlink; see `deploy/` for the systemd unit, Caddyfile, and env template, and
-`.github/workflows/` for the two workflows.
+Self-hosted on a DigitalOcean droplet. You build locally and push a release up — never
+build on the droplet, `next build` peaks well over 1GB.
 
-Never build on the droplet — `next build` peaks well over 1 GB.
+```bash
+./deploy/deploy.sh root@YOUR_DROPLET_IP
+```
+
+That builds, ships the release, flips a symlink, and restarts the service.
 
 ### Layout on the droplet
 
@@ -78,23 +97,29 @@ Never build on the droplet — `next build` peaks well over 1 GB.
 ```
 
 **`current` is a symlink, not a directory, and nothing in the setup below creates it.**
-It first comes into existence partway through the *first successful deploy*, at the
-`ln -sfn` / `mv -Tf` step in `deploy.yml`. Every later deploy re-points it atomically —
-which is also why rollback is just re-pointing it at an older release and restarting,
-with no rebuild.
+It first appears partway through the first successful deploy, at the `ln -sfn` / `mv -Tf`
+step in `deploy.sh`. Every later deploy re-points it atomically — which is why rollback
+is just pointing it at an older release and restarting, with no rebuild:
 
-The consequence: on a fresh droplet, `/var/www/broiestmemes/current` legitimately does
-not exist and the service legitimately cannot run. That is the expected state until CI
-has deployed once. Don't try to `mkdir` it — a real directory there would be clobbered
-by the first `mv -Tf`.
+```bash
+ssh root@HOST 'cd /var/www/broiestmemes && ln -sfn releases/<older> current.new \
+  && mv -Tf current.new current && systemctl restart broiestmemes'
+```
 
-Paths must agree in three places or the unit starts against a directory the deploy
-never created: `WorkingDirectory` and `ReadWritePaths` in the service file, and the
-rsync/symlink target in `deploy.yml`. All three currently use `/var/www/broiestmemes`.
+On a fresh droplet `current` legitimately does not exist and the service cannot run.
+That is the expected state until you have deployed once. Don't `mkdir` it — a real
+directory there gets clobbered by the first `mv -Tf`.
+
+Paths must agree in three places: `WorkingDirectory` and `ReadWritePaths` in the service
+file, and `APP_DIR` in `deploy.sh`. All three use `/var/www/broiestmemes`.
 
 ### One-time setup
 
-1. Create the tree and the service user:
+0. Install Node 22 on the droplet and make sure `/usr/bin/node` is it — that path is
+   hardcoded in the unit's `ExecStart`, and the standalone build now targets 22.x.
+   Check with `/usr/bin/node -v`; if it's a different major, either install 22 there or
+   point `ExecStart` at the right binary.
+1. Create the service user and the tree:
    ```bash
    sudo useradd --system --shell /usr/sbin/nologin broiestbot
    sudo mkdir -p /var/www/broiestmemes/releases
@@ -104,24 +129,13 @@ rsync/symlink target in `deploy.yml`. All three currently use `/var/www/broiestm
    `EnvironmentFile` expects), owned `root:broiestbot`, `chmod 640`. Keep it **outside**
    `current/` — never inside the release tree.
 3. `deploy/broiestmemes.service` → `/etc/systemd/system/`, then **`systemctl enable
-   broiestmemes`** — note: `enable`, *not* `enable --now`. The unit cannot start until
-   `current` exists, because `WorkingDirectory` points at it and systemd fails with
-   `status=200/CHDIR` on a missing working directory. The first deploy creates the
-   symlink and then starts the service itself.
+   broiestmemes`** — `enable`, *not* `enable --now`. The unit cannot start until `current`
+   exists, because `WorkingDirectory` points at it and systemd fails with
+   `status=200/CHDIR` on a missing working directory. The first deploy starts it.
 4. `deploy/Caddyfile` → `/etc/caddy/`. Bring it up **grey-clouded** so the ACME challenge
    reaches the origin, confirm HTTPS, *then* orange-cloud Cloudflare and set SSL to
    Full (strict).
-5. Give the deploy user two narrowly-scoped sudoers entries (`visudo -f
-   /etc/sudoers.d/broiestmemes`). The chown is required because rsync writes each
-   release as the deploy user, but the service runs as `broiestbot` and ISR must be
-   able to write into `.next/cache`:
-   ```
-   deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart broiestmemes
-   deploy ALL=(root) NOPASSWD: /usr/bin/chown -R broiestbot\:broiestbot /var/www/broiestmemes/releases/*
-   ```
-   Substitute your actual `DEPLOY_USER` for `deploy`.
-6. Repo secrets: `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_USER`, `GCP_SA_KEY`,
-   `REVALIDATE_SECRET`. Repo vars: `NEXT_PUBLIC_ASSET_BASE`, `NEXT_PUBLIC_SITE_URL`.
+5. `./deploy/deploy.sh root@YOUR_DROPLET_IP`
 
 ### When a deploy fails
 
@@ -134,7 +148,7 @@ sudo -u broiestbot test -w /var/www/broiestmemes/current/.next/cache && echo wri
 
 `Failed to set up mount namespacing` means a `ReadWritePaths` entry doesn't resolve.
 `EROFS` at runtime means `ProtectSystem=strict` is blocking an ISR write that
-`ReadWritePaths` doesn't cover.
+`ReadWritePaths` doesn't cover. `status=200/CHDIR` means `current` doesn't exist yet.
 
 ## Notable constraints
 
