@@ -132,9 +132,28 @@ file, and `APP_DIR` in `deploy.sh`. All three use `/var/www/broiestmemes`.
    broiestmemes`** — `enable`, *not* `enable --now`. The unit cannot start until `current`
    exists, because `WorkingDirectory` points at it and systemd fails with
    `status=200/CHDIR` on a missing working directory. The first deploy starts it.
-4. `deploy/Caddyfile` → `/etc/caddy/`. Bring it up **grey-clouded** so the ACME challenge
-   reaches the origin, confirm HTTPS, *then* orange-cloud Cloudflare and set SSL to
-   Full (strict).
+4. Install the nginx site and get a certificate. **Don't run `nginx` or `caddy` by
+   hand** — the distro service already owns :80/:443; a second process fails with
+   `bind: address already in use`.
+   ```bash
+   sudo cp deploy/nginx.conf /etc/nginx/sites-available/broiestmemes
+   sudo ln -sfn /etc/nginx/sites-available/broiestmemes /etc/nginx/sites-enabled/
+   sudo rm -f /etc/nginx/sites-enabled/default     # the default site squats :80
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+   Then, with DNS pointed at the droplet and **grey-clouded** (Cloudflare proxy off,
+   so the ACME challenge reaches the origin):
+   ```bash
+   sudo certbot --nginx -d broiestmemes.com -d www.broiestmemes.com
+   ```
+   Certbot edits `/etc/nginx/sites-available/broiestmemes` in place to add the TLS
+   block and the HTTP→HTTPS redirect, and installs a renewal timer. The repo copy is
+   the pre-certbot version — expect the server copy to differ after this.
+
+   Only once HTTPS works: orange-cloud Cloudflare and set SSL mode to Full (strict).
+
+   If :443 is already taken, find the owner with `sudo ss -tlnp 'sport = :443'`.
+
 5. `./deploy/deploy.sh root@YOUR_DROPLET_IP`
 
 ### When a deploy fails
@@ -145,6 +164,11 @@ journalctl -u broiestmemes -n 50        # what Node actually said
 ls -l /var/www/broiestmemes/current     # is the symlink pointing at a real release?
 sudo -u broiestbot test -w /var/www/broiestmemes/current/.next/cache && echo writable
 ```
+
+For nginx: `sudo nginx -t` validates the config, `journalctl -u nginx -n 30 --no-pager`
+shows why it refused to start. `bind: address already in use` means something else holds
+the port — usually the default site, a stray manual process, or a leftover Caddy
+(`systemctl disable --now caddy`).
 
 `Failed to set up mount namespacing` means a `ReadWritePaths` entry doesn't resolve.
 `EROFS` at runtime means `ProtectSystem=strict` is blocking an ISR write that
@@ -164,6 +188,15 @@ sudo -u broiestbot test -w /var/www/broiestmemes/current/.next/cache && echo wri
 - **Slugs are stored, not derived.** Seven filename pairs collide within their category
   (`bigHugeD_bestOf.jpg` / `.png`); the manifest records the resolved slug so URLs never
   move.
+- **The release must be assembled with `rsync -a`, never `cp -r`.** Under pnpm,
+  `standalone/node_modules` is a tree of symlinks into `.pnpm/`, and Node resolves a
+  module from its symlink's *real* path — that is how `next` finds `@swc/helpers` as its
+  sibling inside `.pnpm`. macOS `cp -r` dereferences symlinks, hoisting `next` to the top
+  level and severing it from that peer directory; the server then dies at startup with
+  `Cannot find module '@swc/helpers/_/_interop_require_default'` and systemd crash-loops
+  it forever. `deploy.sh` uses `rsync -a` and refuses to ship if any symlink is broken.
+  (If this class of problem recurs, `node-linker=hoisted` in `.npmrc` makes pnpm produce
+  a flat `node_modules` and removes the symlinks entirely.)
 - **ISR cache is not persisted across deploys** on purpose. A cold cache costs one
   manifest fetch; sharing a mutable cache between builds risks serving payloads generated
   by different code.

@@ -39,13 +39,26 @@ pnpm build
 # `output: 'standalone'` traces only what the server imports — public/ and
 # .next/static/ are NOT included and must be copied in by hand. Skipping this is
 # the classic way to deploy a standalone build that 404s every asset.
+#
+# rsync -a, NOT cp -r. Under pnpm, standalone/node_modules is a tree of symlinks
+# into .pnpm/, and Node resolves a module from its symlink's REAL path — that is
+# how `next` finds @swc/helpers as its sibling inside .pnpm. macOS `cp -r`
+# dereferences symlinks, which hoists `next` to the top level and severs it from
+# that peer directory, so the server dies at startup with
+# "Cannot find module '@swc/helpers/_/_interop_require_default'".
 echo "→ assembling release $STAMP"
 rm -rf .deploy-release
 mkdir -p .deploy-release/.next
-cp -r .next/standalone/. .deploy-release/
-cp -r .next/static .deploy-release/.next/static
-[[ -d public ]] && cp -r public .deploy-release/public
+rsync -a .next/standalone/ .deploy-release/
+rsync -a .next/static/ .deploy-release/.next/static/
+[[ -d public ]] && rsync -a public/ .deploy-release/public/
 mkdir -p .deploy-release/.next/cache
+
+# Cheap insurance: a broken symlink here means a crash-looping service later.
+if find .deploy-release/node_modules -type l ! -exec test -e {} \; -print | grep -q .; then
+  echo "!! broken symlinks in the assembled release — refusing to ship" >&2
+  exit 1
+fi
 
 echo "→ shipping to $TARGET"
 ssh "$TARGET" "mkdir -p $APP_DIR/releases/$STAMP"
@@ -63,6 +76,23 @@ ssh "$TARGET" bash -euo pipefail <<EOF
   systemctl restart broiestmemes
   ls -1dt releases/*/ | tail -n +4 | xargs -r rm -rf
 EOF
+
+# Verify it actually came up. Without this, a release that crash-loops on startup
+# still reports a successful deploy — systemd will restart it forever and the
+# only sign is in journalctl.
+echo "→ verifying"
+if ! ssh "$TARGET" "
+  for i in \$(seq 1 15); do
+    curl -fsS -o /dev/null http://127.0.0.1:3000/ && exit 0
+    sleep 1
+  done
+  exit 1
+"; then
+  echo "!! service did not answer on 127.0.0.1:3000 after 15s" >&2
+  echo "   journalctl -u broiestmemes -n 40 --no-pager:" >&2
+  ssh "$TARGET" "journalctl -u broiestmemes -n 40 --no-pager" >&2 || true
+  exit 1
+fi
 
 rm -rf .deploy-release
 echo "✓ deployed $STAMP"

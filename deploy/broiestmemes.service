@@ -18,7 +18,7 @@ WorkingDirectory=/var/www/broiestmemes/current
 ExecStart=/usr/bin/node server.js
 Environment=NODE_ENV=production
 Environment=PORT=3000
-# Bind to loopback only — Caddy is the sole public entry point, and this keeps
+# Bind to loopback only — nginx is the sole public entry point, and this keeps
 # port 3000 off the droplet's public interface.
 Environment=HOSTNAME=127.0.0.1
 EnvironmentFile=/var/www/broiestmemes/.env
