@@ -12,8 +12,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=broiest
-Group=broiest
+User=broiestbot
+Group=broiestbot
 WorkingDirectory=/var/www/broiestmemes/current
 ExecStart=/usr/bin/node server.js
 Environment=NODE_ENV=production
@@ -21,7 +21,7 @@ Environment=PORT=3000
 # Bind to loopback only — Caddy is the sole public entry point, and this keeps
 # port 3000 off the droplet's public interface.
 Environment=HOSTNAME=127.0.0.1
-EnvironmentFile=/etc/broiestmemes/env
+EnvironmentFile=/var/www/broiestmemes/.env
 Restart=always
 RestartSec=3
 
@@ -29,9 +29,18 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-# The one writable path: ISR's on-disk incremental cache. Everything else stays
-# read-only to the web process.
-ReadWritePaths=/var/www/broiestmemes/current/.next/cache
+# ProtectSystem=strict mounts the whole filesystem read-only for this service.
+# ISR has to write somewhere — it persists revalidated pages and the fetch cache
+# to .next/cache — so this punches a hole back through for exactly that one
+# directory. Without it, revalidation fails with EROFS.
+#
+# The leading `-` makes systemd tolerate the path not existing yet. `current` is
+# a symlink created by the first deploy, so without it `systemctl enable --now`
+# fails on a fresh box with "Failed to set up mount namespacing".
+#
+# systemd resolves this symlink at unit start, which is why the deploy restarts
+# the service after flipping `current` rather than just reloading it.
+ReadWritePaths=-/var/www/broiestmemes/current/.next/cache
 MemoryMax=768M
 
 [Install]

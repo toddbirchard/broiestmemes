@@ -61,10 +61,14 @@ jobs:
           mkdir -p ~/.ssh && echo "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
           STAMP="$(date -u +%Y-%m-%dT%H%M)-${GITHUB_SHA::7}"
+          # rsync only creates the final path component, so the releases/ parent
+          # has to exist or the very first deploy fails.
+          ssh -i ~/.ssh/id_ed25519 "$USER@$HOST" \
+            "mkdir -p /var/www/broiestmemes/releases/$STAMP"
           rsync -az --delete -e "ssh -i ~/.ssh/id_ed25519" \
-            release/ "$USER@$HOST:/srv/broiestmemes/releases/$STAMP/"
+            release/ "$USER@$HOST:/var/www/broiestmemes/releases/$STAMP/"
           ssh -i ~/.ssh/id_ed25519 "$USER@$HOST" bash -euo pipefail <<EOF
-            cd /srv/broiestmemes
+            cd /var/www/broiestmemes
             # Two-step so the swap is atomic — no window where 'current' is missing.
             ln -sfn "releases/$STAMP" current.new
             mv -Tf current.new current

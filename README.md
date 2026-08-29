@@ -68,13 +68,44 @@ Never build on the droplet — `next build` peaks well over 1 GB.
 
 ### One-time setup
 
-1. `deploy/env.example` → `/etc/broiestmemes/env` (root-owned, `chmod 640`).
-2. `deploy/broiestmemes.service` → `/etc/systemd/system/`, then `systemctl enable --now`.
-3. `deploy/Caddyfile` → `/etc/caddy/`. Bring it up **grey-clouded** so the ACME challenge
+Paths must agree in three places or the unit starts against a directory the deploy
+never created: `WorkingDirectory` and `ReadWritePaths` in the service file, and the
+rsync/symlink target in `deploy.yml`. All three currently use `/var/www/broiestmemes`.
+
+1. Create the tree and the service user:
+   ```bash
+   sudo useradd --system --shell /usr/sbin/nologin broiest
+   sudo mkdir -p /var/www/broiestmemes/releases
+   sudo chown -R broiest:broiest /var/www/broiestmemes
+   ```
+2. `deploy/env.example` → `/var/www/broiestmemes/.env` (the path the unit's
+   `EnvironmentFile` expects), owned `root:broiest`, `chmod 640`. Keep it **outside**
+   `current/` — never inside the release tree.
+3. `deploy/broiestmemes.service` → `/etc/systemd/system/`, then `systemctl enable --now`.
+   It will start before the first deploy because `ReadWritePaths` is `-`-prefixed, but
+   it won't serve anything until `current` exists.
+4. `deploy/Caddyfile` → `/etc/caddy/`. Bring it up **grey-clouded** so the ACME challenge
    reaches the origin, confirm HTTPS, *then* orange-cloud Cloudflare and set SSL to
    Full (strict).
-4. Repo secrets: `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_USER`, `GCP_SA_KEY`,
+5. Give the deploy user a narrowly-scoped sudoers entry so CI can restart the service:
+   ```
+   deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart broiestmemes
+   ```
+6. Repo secrets: `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_USER`, `GCP_SA_KEY`,
    `REVALIDATE_SECRET`. Repo vars: `NEXT_PUBLIC_ASSET_BASE`, `NEXT_PUBLIC_SITE_URL`.
+
+### When a deploy fails
+
+```bash
+systemctl status broiestmemes           # unit state
+journalctl -u broiestmemes -n 50        # what Node actually said
+ls -l /var/www/broiestmemes/current     # is the symlink pointing at a real release?
+sudo -u broiest test -w /var/www/broiestmemes/current/.next/cache && echo writable
+```
+
+`Failed to set up mount namespacing` means a `ReadWritePaths` entry doesn't resolve.
+`EROFS` at runtime means `ProtectSystem=strict` is blocking an ISR write that
+`ReadWritePaths` doesn't cover.
 
 ## Notable constraints
 
