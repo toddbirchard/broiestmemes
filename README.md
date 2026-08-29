@@ -66,31 +66,60 @@ symlink; see `deploy/` for the systemd unit, Caddyfile, and env template, and
 
 Never build on the droplet — `next build` peaks well over 1 GB.
 
-### One-time setup
+### Layout on the droplet
+
+```
+/var/www/broiestmemes/
+├── .env                              you create this once (step 2)
+├── releases/
+│   ├── 2026-08-28T1904-a1b2c3d/      one per deploy, created by rsync
+│   └── 2026-08-29T1130-9f8e7d6/
+└── current -> releases/2026-08-29T1130-9f8e7d6
+```
+
+**`current` is a symlink, not a directory, and nothing in the setup below creates it.**
+It first comes into existence partway through the *first successful deploy*, at the
+`ln -sfn` / `mv -Tf` step in `deploy.yml`. Every later deploy re-points it atomically —
+which is also why rollback is just re-pointing it at an older release and restarting,
+with no rebuild.
+
+The consequence: on a fresh droplet, `/var/www/broiestmemes/current` legitimately does
+not exist and the service legitimately cannot run. That is the expected state until CI
+has deployed once. Don't try to `mkdir` it — a real directory there would be clobbered
+by the first `mv -Tf`.
 
 Paths must agree in three places or the unit starts against a directory the deploy
 never created: `WorkingDirectory` and `ReadWritePaths` in the service file, and the
 rsync/symlink target in `deploy.yml`. All three currently use `/var/www/broiestmemes`.
 
+### One-time setup
+
 1. Create the tree and the service user:
    ```bash
-   sudo useradd --system --shell /usr/sbin/nologin broiest
+   sudo useradd --system --shell /usr/sbin/nologin broiestbot
    sudo mkdir -p /var/www/broiestmemes/releases
-   sudo chown -R broiest:broiest /var/www/broiestmemes
+   sudo chown -R broiestbot:broiestbot /var/www/broiestmemes
    ```
 2. `deploy/env.example` → `/var/www/broiestmemes/.env` (the path the unit's
-   `EnvironmentFile` expects), owned `root:broiest`, `chmod 640`. Keep it **outside**
+   `EnvironmentFile` expects), owned `root:broiestbot`, `chmod 640`. Keep it **outside**
    `current/` — never inside the release tree.
-3. `deploy/broiestmemes.service` → `/etc/systemd/system/`, then `systemctl enable --now`.
-   It will start before the first deploy because `ReadWritePaths` is `-`-prefixed, but
-   it won't serve anything until `current` exists.
+3. `deploy/broiestmemes.service` → `/etc/systemd/system/`, then **`systemctl enable
+   broiestmemes`** — note: `enable`, *not* `enable --now`. The unit cannot start until
+   `current` exists, because `WorkingDirectory` points at it and systemd fails with
+   `status=200/CHDIR` on a missing working directory. The first deploy creates the
+   symlink and then starts the service itself.
 4. `deploy/Caddyfile` → `/etc/caddy/`. Bring it up **grey-clouded** so the ACME challenge
    reaches the origin, confirm HTTPS, *then* orange-cloud Cloudflare and set SSL to
    Full (strict).
-5. Give the deploy user a narrowly-scoped sudoers entry so CI can restart the service:
+5. Give the deploy user two narrowly-scoped sudoers entries (`visudo -f
+   /etc/sudoers.d/broiestmemes`). The chown is required because rsync writes each
+   release as the deploy user, but the service runs as `broiestbot` and ISR must be
+   able to write into `.next/cache`:
    ```
    deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart broiestmemes
+   deploy ALL=(root) NOPASSWD: /usr/bin/chown -R broiestbot\:broiestbot /var/www/broiestmemes/releases/*
    ```
+   Substitute your actual `DEPLOY_USER` for `deploy`.
 6. Repo secrets: `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_USER`, `GCP_SA_KEY`,
    `REVALIDATE_SECRET`. Repo vars: `NEXT_PUBLIC_ASSET_BASE`, `NEXT_PUBLIC_SITE_URL`.
 
@@ -100,7 +129,7 @@ rsync/symlink target in `deploy.yml`. All three currently use `/var/www/broiestm
 systemctl status broiestmemes           # unit state
 journalctl -u broiestmemes -n 50        # what Node actually said
 ls -l /var/www/broiestmemes/current     # is the symlink pointing at a real release?
-sudo -u broiest test -w /var/www/broiestmemes/current/.next/cache && echo writable
+sudo -u broiestbot test -w /var/www/broiestmemes/current/.next/cache && echo writable
 ```
 
 `Failed to set up mount namespacing` means a `ReadWritePaths` entry doesn't resolve.

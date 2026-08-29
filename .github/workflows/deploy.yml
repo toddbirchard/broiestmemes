@@ -69,7 +69,13 @@ jobs:
             release/ "$USER@$HOST:/var/www/broiestmemes/releases/$STAMP/"
           ssh -i ~/.ssh/id_ed25519 "$USER@$HOST" bash -euo pipefail <<EOF
             cd /var/www/broiestmemes
-            # Two-step so the swap is atomic — no window where 'current' is missing.
+            # rsync wrote this release as the deploy user, but the service runs as
+            # broiestbot and ISR must write into .next/cache. Without this chown the
+            # site boots fine and then fails on the first revalidation with EACCES.
+            sudo chown -R broiestbot:broiestbot "releases/$STAMP"
+            # 'current' is created here, on the first deploy — nothing in the
+            # one-time setup makes it. Two-step so the swap is atomic: there is no
+            # moment where 'current' is missing for an in-flight request.
             ln -sfn "releases/$STAMP" current.new
             mv -Tf current.new current
             sudo systemctl restart broiestmemes
