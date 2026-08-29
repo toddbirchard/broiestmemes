@@ -1,0 +1,52 @@
+name: Pipeline
+
+# Runs in CI rather than on the droplet for three reasons: H.264 encoding a 54MB
+# GIF would fight the web server for CPU on a 1-vCPU box; it keeps sharp and
+# ffmpeg off the web server entirely; and it keeps the service-account key in
+# GitHub Secrets rather than on an internet-facing host.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Reprocess everything, ignoring the previous manifest"
+        type: boolean
+        default: false
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # sharp and ffmpeg-static both ship prebuilt x64 binaries for ubuntu-latest.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Write credentials
+        run: |
+          printf '%s' '${{ secrets.GCP_SA_KEY }}' > "$RUNNER_TEMP/gcp.json"
+          chmod 600 "$RUNNER_TEMP/gcp.json"
+
+      - name: Run pipeline
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp.json
+          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          # Set, so the pipeline purges the site's cached manifest the moment
+          # anything changed rather than waiting out the 300s ISR window.
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+        run: pnpm pipeline ${{ inputs.force && '--force' || '' }}
+
+      - name: Scrub credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp.json"

@@ -1,0 +1,38 @@
+# /etc/systemd/system/broiestmemes.service
+#
+#   sudo cp deploy/broiestmemes.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now broiestmemes
+#
+# Logs: journalctl -u broiestmemes -f
+
+[Unit]
+Description=broiestmemes.com
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=broiest
+Group=broiest
+WorkingDirectory=/var/www/broiestmemes/current
+ExecStart=/usr/bin/node server.js
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# Bind to loopback only — Caddy is the sole public entry point, and this keeps
+# port 3000 off the droplet's public interface.
+Environment=HOSTNAME=127.0.0.1
+EnvironmentFile=/etc/broiestmemes/env
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+# The one writable path: ISR's on-disk incremental cache. Everything else stays
+# read-only to the web process.
+ReadWritePaths=/var/www/broiestmemes/current/.next/cache
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,80 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Guard against ever committing the service-account key. The site needs no
+      # credentials at all, so this file has no business in the repo.
+      - name: Refuse to build if a credential is tracked
+        run: |
+          if git ls-files | grep -qE '(^|/)(gcloud\.json|.*-key\.json)$'; then
+            echo "::error::A service-account key is tracked in git. Remove it and rotate the key."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_ASSET_BASE: ${{ vars.NEXT_PUBLIC_ASSET_BASE }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+
+      # `output: 'standalone'` traces only what the server imports. public/ and
+      # .next/static/ are NOT included and must be copied in by hand — this is
+      # the step that silently breaks a standalone deploy if you skip it.
+      - name: Assemble release
+        run: |
+          mkdir -p release
+          cp -r .next/standalone/. release/
+          mkdir -p release/.next
+          cp -r .next/static release/.next/static
+          [ -d public ] && cp -r public release/public || true
+          mkdir -p release/.next/cache
+
+      - name: Ship it
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          mkdir -p ~/.ssh && echo "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          STAMP="$(date -u +%Y-%m-%dT%H%M)-${GITHUB_SHA::7}"
+          rsync -az --delete -e "ssh -i ~/.ssh/id_ed25519" \
+            release/ "$USER@$HOST:/srv/broiestmemes/releases/$STAMP/"
+          ssh -i ~/.ssh/id_ed25519 "$USER@$HOST" bash -euo pipefail <<EOF
+            cd /srv/broiestmemes
+            # Two-step so the swap is atomic — no window where 'current' is missing.
+            ln -sfn "releases/$STAMP" current.new
+            mv -Tf current.new current
+            sudo systemctl restart broiestmemes
+            # Keep the last 3 releases so a rollback is just re-pointing the symlink.
+            ls -1dt releases/*/ | tail -n +4 | xargs -r rm -rf
+          EOF
+
+      - name: Smoke test
+        run: |
+          sleep 5
+          curl -fsS --retry 5 --retry-delay 3 "${{ vars.NEXT_PUBLIC_SITE_URL }}/" > /dev/null
+          echo "site responding"

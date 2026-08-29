@@ -1,0 +1,7 @@
+allowBuilds:
+  # tsx's bundler; needs its postinstall to place the platform binary.
+  esbuild: true
+  # postinstall downloads the platform ffmpeg binary used for GIF -> H.264.
+  ffmpeg-static: true
+minimumReleaseAgeExclude:
+  - zod@4.5.1

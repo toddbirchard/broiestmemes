@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+/*
+  broiestmemes — "specimen catalog"
+
+  The conceit: apply archival exactness to profoundly unserious content. The
+  bucket's own metadata (object paths, byte counts, generation dates) is the
+  decorative material, set in mono, because that is literally what it is.
+
+  Committed to a single dark treatment on purpose: this is an image gallery, and
+  1,900 memes of wildly varying background colour read far better against a warm
+  near-black than against paper. The warmth matters — a neutral #0a0a0a makes the
+  JPEG-heavy content look grey and dead.
+*/
+
+@theme {
+  --color-ink: #14110f; /* warm near-black, the page ground */
+  --color-ink-raised: #1c1815; /* cards, tiles, any lifted surface */
+  --color-ink-sunken: #0d0b0a; /* image wells, so memes sit *in* the page */
+  --color-hairline: #2e2823; /* structural rules */
+  --color-hairline-lit: #4a4038; /* hover / focus borders */
+
+  --color-bone: #ece4d8; /* primary text — paper, not white */
+  --color-dim: #8f8375; /* metadata, secondary text */
+  --color-faint: #5d554d; /* tertiary, disabled */
+
+  --color-amber: #e8a33d; /* structure, counts, "new" */
+  --color-amber-dim: #7a5a25;
+  --color-signal: #5ec8d8; /* interaction: links, focus, active state */
+  --color-signal-dim: #2b5c66;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@layer base {
+  * {
+    min-width: 0;
+  }
+
+  html {
+    background: var(--color-ink);
+    /* Stops the layout jumping horizontally between short and tall pages. */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    background: var(--color-ink);
+    color: var(--color-bone);
+    font-family: var(--font-display);
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Keyboard focus must stay obvious everywhere — this site is heavily
+     keyboard-driven (/, arrows, Esc, c). */
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--color-amber);
+    color: var(--color-ink);
+  }
+
+  img,
+  video {
+    display: block;
+    max-width: 100%;
+  }
+}
+
+@layer components {
+  /* The metadata voice: object paths, byte counts, dates, counts. Used
+     everywhere real bucket data is shown, and nowhere else. */
+  .meta {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-dim);
+  }
+
+  .meta-sm {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-faint);
+  }
+
+  /*
+    Justified-row gallery (Flickr/Google Photos), pure CSS.
+
+    Chosen over CSS `columns` because columns reorder content into column-major,
+    which breaks tab order and makes lightbox prev/next feel random. Here DOM
+    order is preserved exactly, every row lands at a uniform height, and there is
+    zero layout shift because --ar comes from the manifest.
+  */
+  .gallery {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gap, 10px);
+  }
+
+  .gallery::after {
+    /* Without this the final row stretches its few items to full width. */
+    content: "";
+    flex-grow: 999999;
+    min-width: 0;
+  }
+
+  .gallery > * {
+    flex-grow: var(--ar);
+    flex-basis: calc(var(--ar) * var(--row-h, 220px));
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
