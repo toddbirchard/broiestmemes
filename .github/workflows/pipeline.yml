@@ -1,0 +1,56 @@
+name: Pipeline
+
+on:
+  schedule:
+    # Hourly, off the top of the hour — :00 is GitHub's busiest slot and the most likely
+    # to start late or be skipped under load.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "Extra pipeline flags (e.g. --force, --no-video)"
+        required: false
+        default: ""
+
+# Two runs at once would race on the published manifest. Queue, never cancel —
+# a cancelled run can leave derivatives uploaded with no manifest pointing at them.
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.8.1
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Writes only. Reads go over anonymous public HTTPS and need no key.
+      - name: Write GCS key
+        env:
+          GCS_KEY: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
+        run: printf '%s' "$GCS_KEY" > "$RUNNER_TEMP/gcloud.json"
+
+      - name: Run pipeline
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcloud.json
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+          NEXT_PUBLIC_SITE_URL: https://broiestmemes.com
+          ARGS: ${{ inputs.args }}
+        # `run` is required: pnpm 12 has a built-in `pnpm pipeline` command that shadows the script.
+        # $ARGS is unquoted on purpose so multiple flags split into separate arguments.
+        run: pnpm run pipeline $ARGS

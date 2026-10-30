@@ -67,11 +67,18 @@ export async function listBucket(): Promise<ListedObject[]> {
 }
 
 /**
- * Source memes only: drops the 114 zero-byte directory placeholders and
- * everything the pipeline itself wrote under `_derived/`.
+ * Working files that live in the bucket but aren't memes (Photoshop sources,
+ * text notes). sharp can't decode them, so left in they fail every run. A
+ * denylist, not an allowlist: several real memes have no extension at all.
+ */
+const NON_MEDIA_EXT = /\.(psd|rtf)$/i;
+
+/**
+ * Source memes only: drops the 114 zero-byte directory placeholders,
+ * everything the pipeline itself wrote under `_derived/`, and non-media files.
  */
 export function sourceObjects(all: ListedObject[]): ListedObject[] {
-  return all.filter((o) => isSourceObject(o.name));
+  return all.filter((o) => isSourceObject(o.name) && !NON_MEDIA_EXT.test(o.name));
 }
 
 /** Download an original over anonymous public HTTPS. */

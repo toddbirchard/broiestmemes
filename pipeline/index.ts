@@ -362,6 +362,9 @@ async function main() {
   if (errors.length > 0) {
     console.log("\nerrors:");
     for (const e of errors) console.log(`  ${e.name}: ${e.error}`);
+    // Per-item failures don't abort the run, but they must still fail it, or a
+    // scheduled run that silently drops memes reports green.
+    process.exitCode = 1;
   }
 }
 
