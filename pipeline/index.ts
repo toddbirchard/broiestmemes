@@ -25,6 +25,7 @@ const { values } = parseArgs({
     concurrency: { type: "string", default: "6" },
     "no-video": { type: "boolean", default: false },
     limit: { type: "string" },
+    publish: { type: "boolean", default: false },
     help: { type: "boolean", default: false },
   },
 });
@@ -39,6 +40,7 @@ broiestmemes pipeline
   --dry-run          derive but upload nothing
   --concurrency <n>  parallel workers (default 6)
   --no-video         skip H.264 transcodes (much faster; posters only)
+  --publish          republish site artifacts even if nothing changed
 `);
   process.exit(0);
 }
@@ -324,8 +326,25 @@ async function main() {
   }
 
   // ---- publish ----------------------------------------------------------
+  //
+  // Most scheduled runs find nothing new. Republishing identical artifacts only
+  // bumps `generatedAt` and makes the site refetch ~4MB for nothing, so skip it.
+  // Nothing produced means every entry was reused from `previous`, so equal
+  // counts means nothing was removed either. `--publish` overrides, for when
+  // buildSiteArtifacts changes shape without a PIPELINE_VERSION bump.
+  const unchanged =
+    previous !== null &&
+    !values.publish &&
+    produced.length === 0 &&
+    entries.length === previous.items.length &&
+    previous.pipelineVersion === manifest.pipelineVersion &&
+    previous.assetBase === manifest.assetBase &&
+    sameErrors(previous.errors, errors);
+
   const json = JSON.stringify(manifest);
-  if (DRY) {
+  if (unchanged) {
+    console.log("→ nothing changed: manifest NOT republished");
+  } else if (DRY) {
     console.log(`→ dry run: would upload manifest (${(json.length / 1024).toFixed(0)}KB)`);
   } else if (PARTIAL) {
     // A partial run's entry list is not the whole bucket; publishing it would
@@ -366,6 +385,13 @@ async function main() {
     // scheduled run that silently drops memes reports green.
     process.exitCode = 1;
   }
+}
+
+/** Order-insensitive: errors are pushed as workers finish, not in plan order. */
+function sameErrors(a: Manifest["errors"], b: Manifest["errors"]): boolean {
+  const key = (list: Manifest["errors"]) =>
+    JSON.stringify([...list].sort((x, y) => x.name.localeCompare(y.name)));
+  return key(a) === key(b);
 }
 
 /** Tell the site to drop its cached manifest immediately. Best-effort. */

@@ -56,7 +56,12 @@ pnpm run pipeline --only gerald      # one category (never publishes or prunes)
 pnpm run pipeline --dry-run          # derive, upload nothing
 pnpm run pipeline --force            # ignore previous state, rebuild everything
 pnpm run pipeline --no-video         # skip H.264 transcodes (much faster)
+pnpm run pipeline --publish          # republish site artifacts even if nothing changed
 ```
+
+A run that processes nothing, removes nothing and hits the same errors as last time
+publishes nothing either — no manifest upload, no revalidate. `--publish` overrides that,
+for when `buildSiteArtifacts` changes shape without a `PIPELINE_VERSION` bump.
 
 Always `pnpm run pipeline`, never bare `pnpm pipeline`: pnpm 12 ships a built-in
 `pipeline` command that shadows the script and fails with `ERR_PNPM_NO_PIPELINES`.
