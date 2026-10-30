@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, JetBrains_Mono } from "next/font/google";
 import { SITE_URL } from "@/lib/assets";
+import { baseOpenGraph, SITE_DESCRIPTION, SITE_NAME } from "@/lib/metadata";
 import "./globals.css";
 
 /*
@@ -27,21 +28,30 @@ const jetbrains = JetBrains_Mono({
   weight: ["400", "500"],
 });
 
+// The share image lives alongside this file as opengraph-image.tsx, and the
+// icons as icon.png / apple-icon.png; Next injects all three automatically.
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Broiest Memes",
-    template: "%s · Broiest Memes",
+    default: SITE_NAME,
+    template: `%s · ${SITE_NAME}`,
   },
-  description:
-    "A browsable archive of 1,900-odd memes, sorted into 112 categories and accumulated since 2019.",
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  category: "entertainment",
   openGraph: {
+    ...baseOpenGraph,
     type: "website",
-    siteName: "Broiest Memes",
-    url: SITE_URL,
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    url: "/",
   },
   twitter: { card: "summary_large_image" },
   robots: { index: true, follow: true },
+  appleWebApp: { title: SITE_NAME, statusBarStyle: "black-translucent" },
+  // Byte counts and timestamps are all over the page; stop iOS Safari from
+  // turning digit runs into tel: links.
+  formatDetection: { telephone: false, email: false, address: false },
 };
 
 export const viewport: Viewport = {

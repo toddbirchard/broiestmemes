@@ -6,6 +6,7 @@ import { MemeStage } from "@/components/image/MemeStage";
 import { MetaPanel } from "@/components/image/MetaPanel";
 import { assetUrl } from "@/lib/assets";
 import { getEntry, getNeighbours } from "@/lib/catalog";
+import { baseOpenGraph, SITE_NAME } from "@/lib/metadata";
 
 /**
  * Not prerendered. ~1,900 image pages would bloat the build for pages that are
@@ -32,9 +33,11 @@ export async function generateMetadata({
     description: `${entry.title} — from the ${entry.category} collection.`,
     alternates: { canonical: `/${entry.category}/${entry.slug}` },
     openGraph: {
+      ...baseOpenGraph,
       type: "article",
       title: entry.title,
-      description: `From ${entry.category}/ · Broiest Memes`,
+      description: `From ${entry.category}/ · ${SITE_NAME}`,
+      publishedTime: entry.source.timeCreated,
       url: `/${entry.category}/${entry.slug}`,
       // Always the `og` derivative, never the source: a 54MB GIF will not
       // unfurl anywhere, and width/height are what make Slack render a large

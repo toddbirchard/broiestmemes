@@ -1,10 +1,24 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { CatalogGrid } from "@/components/home/CatalogGrid";
 import { RecentRail } from "@/components/home/RecentRail";
 import { getHome, resolveCovers } from "@/lib/catalog";
 import { formatAge, formatBytes, formatCount } from "@/lib/format";
+import { baseOpenGraph, SITE_NAME } from "@/lib/metadata";
 import type { MemeEntry } from "@/types/manifest";
+
+/** Live counts from the index, so the description never drifts from the page. */
+export async function generateMetadata(): Promise<Metadata> {
+  const { stats } = await getHome();
+  const description = `A browsable archive of ${formatCount(stats.items)} memes, sorted into ${formatCount(stats.categories)} categories and accumulated since 2019.`;
+
+  return {
+    description,
+    alternates: { canonical: "/" },
+    openGraph: { ...baseOpenGraph, type: "website", title: SITE_NAME, description, url: "/" },
+  };
+}
 
 export default async function HomePage() {
   const index = await getHome();

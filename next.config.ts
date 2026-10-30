@@ -6,6 +6,12 @@ const nextConfig: NextConfig = {
   // script copies them in explicitly. See deploy/deploy.sh.
   output: "standalone",
 
+  // opengraph-image.tsx reads its fonts and mascot from disk at runtime; make
+  // sure the trace carries them into the standalone bundle.
+  outputFileTracingIncludes: {
+    "/opengraph-image": ["./src/app/_og/**/*"],
+  },
+
   images: {
     // We generate every derivative ourselves in pipeline/ and serve them
     // straight from GCS. Next's optimizer would be redundant CPU on a small

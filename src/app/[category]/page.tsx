@@ -5,6 +5,7 @@ import { Gallery } from "@/components/category/Gallery";
 import { assetUrl } from "@/lib/assets";
 import { getCategory, getCategoryNeighbours, getHome } from "@/lib/catalog";
 import { formatBytes, formatCount, formatSpan } from "@/lib/format";
+import { baseOpenGraph, SITE_NAME } from "@/lib/metadata";
 
 /** All 112 categories are prerendered; there are few enough that it's ~free. */
 export async function generateStaticParams() {
@@ -30,8 +31,9 @@ export async function generateMetadata({
     description,
     alternates: { canonical: `/${summary.name}` },
     openGraph: {
+      ...baseOpenGraph,
       type: "website",
-      title: `${summary.title} · Broiest Memes`,
+      title: `${summary.title} · ${SITE_NAME}`,
       description,
       url: `/${summary.name}`,
       images: cover
