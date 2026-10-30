@@ -51,12 +51,20 @@ Reads originals over anonymous public HTTPS; **writes** need a GCS key
 commit it, and never put it in `public/`).
 
 ```bash
-pnpm pipeline                    # incremental: usually 0 processed, ~2s
-pnpm pipeline --only gerald      # one category (never publishes or prunes)
-pnpm pipeline --dry-run          # derive, upload nothing
-pnpm pipeline --force            # ignore previous state, rebuild everything
-pnpm pipeline --no-video         # skip H.264 transcodes (much faster)
+pnpm run pipeline                    # incremental: usually 0 processed, ~2s
+pnpm run pipeline --only gerald      # one category (never publishes or prunes)
+pnpm run pipeline --dry-run          # derive, upload nothing
+pnpm run pipeline --force            # ignore previous state, rebuild everything
+pnpm run pipeline --no-video         # skip H.264 transcodes (much faster)
 ```
+
+Always `pnpm run pipeline`, never bare `pnpm pipeline`: pnpm 12 ships a built-in
+`pipeline` command that shadows the script and fails with `ERR_PNPM_NO_PIPELINES`.
+
+Any item that fails to derive makes the run exit 1, after everything else has been
+published. `.psd` and `.rtf` files in the bucket are working files, not memes, and are
+skipped (`pipeline/list.ts`) — sharp can't decode them. Files with no extension are real
+memes and are processed normally.
 
 `--only` and `--limit` are read-mostly on purpose: a partial run sees a deliberate
 subset of the bucket, and both publishing and pruning treat "absent from this run" as
@@ -73,6 +81,24 @@ After a run that changed something, the pipeline POSTs `/api/revalidate` to drop
 site's cached manifest immediately — set `REVALIDATE_SECRET` and `NEXT_PUBLIC_SITE_URL`
 in your local env to match `/var/www/broiestmemes/.env` and it happens automatically.
 It's optional: without it the site picks up changes on its own within 300s.
+
+### Scheduled runs
+
+`.github/workflows/pipeline.yml` runs the pipeline hourly at :17 UTC, so a meme uploaded
+to the bucket is live within about an hour with no manual step. Runs queue rather than
+overlap. Trigger one by hand from Actions → Pipeline → Run workflow; the `args` input
+takes the same flags as above (e.g. `--force`).
+
+It needs two repository secrets (Settings → Secrets and variables → Actions):
+
+- `GCS_SERVICE_ACCOUNT_KEY` — the full JSON contents of `gcloud.json`
+- `REVALIDATE_SECRET` — must match `/var/www/broiestmemes/.env` on the droplet;
+  optional, as above
+
+A failed run emails the repo owner, and because the schedule is hourly so will every run
+after it until the cause is fixed. GitHub also disables scheduled workflows on a public
+repo after 60 days without a commit — it emails a warning first, and re-enabling is one
+click in the Actions tab.
 
 ## Deploy
 
